@@ -28,7 +28,7 @@
 
 namespace bustub {
 
-TEST(LRUKReplacerTest, DISABLED_SampleTest) {
+TEST(LRUKReplacerTest, SampleTest) {
   // Note that comparison with `std::nullopt` always results in `false`, and if the optional type actually does contain
   // a value, the comparison will compare the inner value.
   // See: https://devblogs.microsoft.com/oldnewthing/20211004-00/?p=105754
@@ -56,12 +56,14 @@ TEST(LRUKReplacerTest, DISABLED_SampleTest) {
 
   // Record an access for frame 1. Now frame 1 has two accesses total.
   lru_replacer.RecordAccess(1);
+  std::cout<< "enter access\n" << '\n';
   // All other frames now share the maximum backward k-distance. Since we use timestamps to break ties, where the first
   // to be evicted is the frame with the oldest timestamp, the order of eviction should be [2, 3, 4, 5, 1].
 
   // Evict three pages from the replacer.
   // To break ties, we use LRU with respect to the oldest timestamp, or the least recently used frame.
   ASSERT_EQ(2, lru_replacer.Evict());
+  std::cout<<"enter evict 1\n"<<'\n';
   ASSERT_EQ(3, lru_replacer.Evict());
   ASSERT_EQ(4, lru_replacer.Evict());
   ASSERT_EQ(2, lru_replacer.Size());
