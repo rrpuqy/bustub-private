@@ -48,7 +48,7 @@ class WritePageGuard;
  * front). This large contiguous block of memory is then divided into contiguous frames. In other words, frames are
  * defined by an offset from the base of the array in page-sized (4 KB) intervals.
  *
- * In BusTub, we instead allocate each frame on its own (via a `std::vector<char>`) in order to easily detect buffer
+ * In BusTub, we instead allocate each frame on its own (via a `std::vector<char>`) in order to easily detect buffer              
  * overflow with address sanitizer. Since C++ has no notion of memory safety, it would be very easy to cast a page's
  * data pointer into some large data type and start overwriting other pages of data if they were all contiguous.
  *
@@ -87,7 +87,7 @@ class FrameHeader {
    * If the frame does not hold any page data, the frame contains all null bytes.
    */
   std::vector<char> data_;
-
+  page_id_t page_id_;
   /**
    * TODO(P1): You may add any fields or helper functions under here that you think are necessary.
    *

@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <iostream>
 #include <memory>
 #include <random>
 #include <set>
@@ -77,6 +78,7 @@ TEST(LRUKReplacerTest, SampleTest) {
   lru_replacer.SetEvictable(3, true);
   lru_replacer.SetEvictable(4, true);
   ASSERT_EQ(4, lru_replacer.Size());
+  std::cout<< "[3,1,5,4]\n";
 
   // Look for a frame to evict. We expect frame 3 to be evicted next.
   ASSERT_EQ(3, lru_replacer.Evict());

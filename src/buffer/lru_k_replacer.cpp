@@ -129,12 +129,14 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType
             auto next_node = node_store_.find(*cur_iter)->second.first;
             if((lru_node.first < next_node)){
                 lru_list_.insert(cur_iter, frame_id);
+                lru_node.second = std::prev(cur_iter);
                 break;            
             }
             ++cur_iter;
         }
         if(cur_iter == lru_list_.end()){
             lru_list_.push_back(frame_id);
+            lru_node.second = std::prev(cur_iter);
         }
         // lru_list_.erase(it);
         // lru_list_.push_back(frame_id)

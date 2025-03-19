@@ -11,6 +11,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "buffer/buffer_pool_manager.h"
+#include <optional>
+#include "storage/page/page_guard.h"
 
 namespace bustub {
 
@@ -28,6 +30,8 @@ FrameHeader::FrameHeader(frame_id_t frame_id) : frame_id_(frame_id), data_(BUSTU
  *
  * @return const char* A pointer to immutable data that the frame stores.
  */
+
+
 auto FrameHeader::GetData() const -> const char * { return data_.data(); }
 
 /**
@@ -116,7 +120,11 @@ auto BufferPoolManager::Size() const -> size_t { return num_frames_; }
  *
  * @return The page ID of the newly allocated page.
  */
-auto BufferPoolManager::NewPage() -> page_id_t { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::NewPage() -> page_id_t { 
+  auto page_id = next_page_id_.fetch_add(1);
+  return page_id;
+  UNIMPLEMENTED("TODO(P1): Add implementation.");
+}
 
 /**
  * @brief Removes a page from the database, both on disk and in memory.
@@ -186,6 +194,38 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool { UNIMPLEMENTED("T
  * returns `std::nullopt`, otherwise returns a `WritePageGuard` ensuring exclusive and mutable access to a page's data.
  */
 auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_type) -> std::optional<WritePageGuard> {
+  if(page_table_.find(page_id) != page_table_.end()){
+      // 什么时候可以进行evicate驱逐, 驱逐的时候是不是也要加锁
+    
+  }
+  else{
+    if(free_frames_.empty()){
+      // 驱逐
+
+    }
+    else{
+      // 查找frame的过程 只需要加bufferpool的锁保护
+      
+      // std::scoped_lock latch(*bpm_latch_);
+      bpm_latch_->lock();
+      auto page_id = NewPage();
+      auto frame_id = free_frames_.front();
+      page_table_[page_id] = frame_id;
+      free_frames_.pop_front();
+      auto frame = frames_[frame_id];
+      frame->page_id_ = page_id;
+      bpm_latch_->unlock();
+      // 对frame做修改 需要对frame加锁 这部分操作是不是应该都放在pageGuard去做
+      
+      // 现在需要进行写
+
+      WritePageGuard guard(page_id, frame, replacer_, bpm_latch_, disk_scheduler_);
+      return {std::move(guard)}; 
+      // 现在需要
+
+    }
+
+  }
   UNIMPLEMENTED("TODO(P1): Add implementation.");
 }
 
