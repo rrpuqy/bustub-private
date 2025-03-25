@@ -11,7 +11,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "buffer/buffer_pool_manager.h"
+#include <memory>
+#include <mutex>
 #include <optional>
+#include <utility>
+#include "storage/disk/disk_scheduler.h"
 #include "storage/page/page_guard.h"
 
 namespace bustub {
@@ -31,7 +35,6 @@ FrameHeader::FrameHeader(frame_id_t frame_id) : frame_id_(frame_id), data_(BUSTU
  * @return const char* A pointer to immutable data that the frame stores.
  */
 
-
 auto FrameHeader::GetData() const -> const char * { return data_.data(); }
 
 /**
@@ -48,6 +51,7 @@ void FrameHeader::Reset() {
   std::fill(data_.begin(), data_.end(), 0);
   pin_count_.store(0);
   is_dirty_ = false;
+  page_id_ = INVALID_PAGE_ID;
 }
 
 /**
@@ -120,12 +124,24 @@ auto BufferPoolManager::Size() const -> size_t { return num_frames_; }
  *
  * @return The page ID of the newly allocated page.
  */
-auto BufferPoolManager::NewPage() -> page_id_t { 
+auto BufferPoolManager::NewPage() -> page_id_t {
   auto page_id = next_page_id_.fetch_add(1);
   return page_id;
   UNIMPLEMENTED("TODO(P1): Add implementation.");
 }
 
+
+auto BufferPoolManager::GetFromDisk(page_id_t page_id,std::shared_ptr<FrameHeader> frame) -> bool{
+  DiskRequest request;
+  request.is_write_ = false;
+  request.data_ = frame->GetDataMut();
+  request.page_id_ = page_id;
+  request.callback_ = disk_scheduler_->CreatePromise();
+  auto future = request.callback_.get_future();
+  disk_scheduler_->Schedule(std::move(request));
+  future.wait();
+  return future.get();
+}
 /**
  * @brief Removes a page from the database, both on disk and in memory.
  *
@@ -194,37 +210,101 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool { UNIMPLEMENTED("T
  * returns `std::nullopt`, otherwise returns a `WritePageGuard` ensuring exclusive and mutable access to a page's data.
  */
 auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_type) -> std::optional<WritePageGuard> {
-  if(page_table_.find(page_id) != page_table_.end()){
-      // 什么时候可以进行evicate驱逐, 驱逐的时候是不是也要加锁
+  auto frame_id = num_frames_ + 1;
+  std::shared_ptr<FrameHeader> frame{nullptr};
+  {
+    std::unique_lock<std::mutex> lock(*bpm_latch_);
     
-  }
-  else{
-    if(free_frames_.empty()){
-      // 驱逐
+    
+    if (page_table_.find(page_id) != page_table_.end()) {
+      // 什么时候可以进行evicate驱逐, 驱逐的时候是不是也要加锁
+      frame_id = page_table_[page_id];
+      frame = frames_[frame_id];
+      auto cnt = frame->pin_count_++;
+      lock.unlock();
+      //
+      if(!frame->is_loaded_.load()){
+        // 等待数据读入
+        std::scoped_lock<std::mutex> latch(frame->latch_);
+      }
 
-    }
-    else{
-      // 查找frame的过程 只需要加bufferpool的锁保护
-      
-      // std::scoped_lock latch(*bpm_latch_);
-      bpm_latch_->lock();
-      auto page_id = NewPage();
-      auto frame_id = free_frames_.front();
-      page_table_[page_id] = frame_id;
-      free_frames_.pop_front();
-      auto frame = frames_[frame_id];
-      frame->page_id_ = page_id;
-      bpm_latch_->unlock();
+      // if(!frame->is_loaded_.load()){
+      //   frame->latch_.lock();
+      //   if(!frame->is_loaded_.load()){
+      //     // 读入数据
+      //     GetFromDisk(page_id
+      //       ,frame);
+      //     frame->is_loaded_.store(true);
+      //   }
+      // }
+
+    } else {
+      if (free_frames_.empty()) {
+        // 驱逐
+        auto opt = replacer_->Evict();
+        if (!opt.has_value()) {
+          return std::nullopt;
+        }
+        frame_id = opt.value();
+        frame = frames_[frame_id];
+        // 驱逐的时候要加锁
+        // frame->rwlatch_.lock();
+        page_table_.erase(frame->page_id_);
+        page_table_[page_id] = frame_id;
+        frame->latch_.lock();
+        frame->is_loaded_ = false;
+        // 写回磁盘
+        if (frame->is_dirty_) {
+          // 写回磁盘
+          lock.unlock();
+          DiskRequest request;
+          request.is_write_ = true;
+          request.data_ = frame->GetDataMut();
+          request.page_id_ = frame->page_id_;
+          request.callback_ = disk_scheduler_->CreatePromise();
+          disk_scheduler_->Schedule(std::move(request));
+          // 等待写回磁盘
+          auto future = request.callback_.get_future();
+          future.wait();
+          frame->Reset();
+          frame->page_id_ = page_id;
+          lock.lock();
+        }
+        else{
+          frame->Reset();
+          frame->page_id_ = page_id;
+        }
+        // 驱逐完毕
+        GetFromDisk(page_id, frame);
+        frame->pin_count_++;
+        lock.unlock();   
+        // free_frames_.push_back(frame_id);
+      } else {
+        // 查找frame的过程 只需要加bufferpool的锁保护
+
+        // std::scoped_lock latch(*bpm_latch_);
+        frame_id = free_frames_.front();
+        page_table_[page_id] = frame_id;
+        free_frames_.pop_front();
+        frame = frames_[frame_id];
+        frame->page_id_ = page_id;
+        auto cnt = frame->pin_count_++;
+        std::scoped_lock<std::mutex> latch(frame->latch_);
+        lock.unlock();
+        // 读入数据
+        GetFromDisk(page_id
+         ,frame);
+        frame->is_loaded_.store(true);
+      }
+
       // 对frame做修改 需要对frame加锁 这部分操作是不是应该都放在pageGuard去做
-      
+
       // 现在需要进行写
 
       WritePageGuard guard(page_id, frame, replacer_, bpm_latch_, disk_scheduler_);
-      return {std::move(guard)}; 
+      return {std::move(guard)};
       // 现在需要
-
     }
-
   }
   UNIMPLEMENTED("TODO(P1): Add implementation.");
 }
@@ -326,7 +406,33 @@ auto BufferPoolManager::ReadPage(page_id_t page_id, AccessType access_type) -> R
  * @param page_id The page ID of the page to be flushed.
  * @return `false` if the page could not be found in the page table, otherwise `true`.
  */
-auto BufferPoolManager::FlushPageUnsafe(page_id_t page_id) -> bool { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::FlushPageUnsafe(page_id_t page_id) -> bool {
+  //  std::scoped_lock<std::mutex> lock(*bpm_latch_);
+  bpm_latch_->lock();
+  auto iter = page_table_.find(page_id);
+  if (iter == page_table_.end()) {
+    return false;
+  }
+  auto frame_id = iter->second;
+  auto frame = frames_[frame_id];
+  if (!frame->is_dirty_) {
+    bpm_latch_->unlock();
+    return true;
+  }
+  frame->pin_count_++;
+  bpm_latch_->unlock();
+  // 写回磁盘
+  DiskRequest r;
+  r.is_write_ = true;
+  r.data_ = frame->GetDataMut();
+  r.page_id_ = page_id;
+  r.callback_ = disk_scheduler_->CreatePromise();
+  auto future = r.callback_.get_future();
+  disk_scheduler_->Schedule(std::move(r));
+  future.wait();
+
+  return true;
+}
 
 /**
  * @brief Flushes a page's data out to disk safely.

@@ -12,8 +12,11 @@
 
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -88,6 +91,9 @@ class FrameHeader {
    */
   std::vector<char> data_;
   page_id_t page_id_;
+  std::mutex latch_;
+  std::atomic_bool is_loaded_{false};
+  std::condition_variable cv_;
   /**
    * TODO(P1): You may add any fields or helper functions under here that you think are necessary.
    *
@@ -126,6 +132,7 @@ class BufferPoolManager {
   void FlushAllPagesUnsafe();
   void FlushAllPages();
   auto GetPinCount(page_id_t page_id) -> std::optional<size_t>;
+  auto GetFromDisk(page_id_t page_id,std::shared_ptr<FrameHeader> frame) -> bool;
 
  private:
   /** @brief The number of frames in the buffer pool. */
@@ -155,6 +162,8 @@ class BufferPoolManager {
 
   /** @brief A pointer to the disk scheduler. Shared with the page guards for flushing. */
   std::shared_ptr<DiskScheduler> disk_scheduler_;
+
+  
 
   /**
    * @brief A pointer to the log manager.

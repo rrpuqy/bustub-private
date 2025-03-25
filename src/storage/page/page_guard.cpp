@@ -12,6 +12,7 @@
 
 #include "storage/page/page_guard.h"
 #include <memory>
+#include <mutex>
 #include "storage/disk/disk_scheduler.h"
 
 namespace bustub {
@@ -38,8 +39,15 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
       bpm_latch_(std::move(bpm_latch)),
       disk_scheduler_(std::move(disk_scheduler)) {
   is_valid_ = true;
+  
   frame_->rwlatch_.lock_shared();
-  frame_->pin_count_++;
+  auto cnt = frame_->pin_count_++;
+  if (cnt == 0) {
+    std::scoped_lock<std::mutex> lock(*bpm_latch_);
+    if(frame->pin_count_.load() == 1) {
+      replacer_->SetEvictable(frame_->frame_id_, false);
+    }
+  }
   replacer_->RecordAccess(frame_->frame_id_);
 
 }
@@ -165,7 +173,13 @@ void ReadPageGuard::Flush() {
  */
 void ReadPageGuard::Drop() { 
   if (is_valid_) {
-    frame_->pin_count_--;
+    auto cnt = frame_->pin_count_--;
+    if (cnt == 1) {
+      std::scoped_lock<std::mutex> lock(*bpm_latch_);
+      if(frame_->pin_count_.load() == 0) {
+        replacer_->SetEvictable(frame_->frame_id_, true);
+      }
+    }
     frame_->rwlatch_.unlock_shared();
   }
 }
