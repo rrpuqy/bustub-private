@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <future>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -132,7 +133,8 @@ class BufferPoolManager {
   void FlushAllPagesUnsafe();
   void FlushAllPages();
   auto GetPinCount(page_id_t page_id) -> std::optional<size_t>;
-  auto GetFromDisk(page_id_t page_id,std::shared_ptr<FrameHeader> frame) -> bool;
+  auto TransDisk(page_id_t page_id,std::shared_ptr<FrameHeader> & frame,bool flag) -> std::future<bool>;
+  auto GetFrame(page_id_t page_id) -> std::shared_ptr<FrameHeader>;
 
  private:
   /** @brief The number of frames in the buffer pool. */
