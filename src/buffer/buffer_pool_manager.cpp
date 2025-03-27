@@ -189,6 +189,7 @@ auto BufferPoolManager::GetFrame(page_id_t page_id) -> std::shared_ptr<FrameHead
     lock.unlock();
     std::unique_lock<std::mutex> init_lock(frame->latch_);
     frame->cv_.wait(init_lock, [&]() { return frame->is_loaded_.load(); });
+    init_lock.unlock();
   } else {
     if (free_frames_.empty()) {
       // 驱逐
@@ -230,7 +231,6 @@ auto BufferPoolManager::GetFrame(page_id_t page_id) -> std::shared_ptr<FrameHead
     // 现在需要进行写
     if (!frame->is_loaded_.load()) {
       // 读入数据
-      
       TransDisk(page_id, frame, false).wait();
       std::unique_lock<std::mutex> init_lock(frame->latch_);
       frame->is_loaded_ = true;
@@ -394,32 +394,35 @@ auto BufferPoolManager::ReadPage(page_id_t page_id, AccessType access_type) -> R
 auto BufferPoolManager::FlushPageUnsafe(page_id_t page_id) -> bool {
   //  std::scoped_lock<std::mutex> lock(*bpm_latch_);
   std::unique_lock<std::mutex> lock(*bpm_latch_);
+  auto latch = bpm_latch_;
   auto iter = page_table_.find(page_id);
   if (iter == page_table_.end()) {
     return false;
   }
   auto frame_id = iter->second;
   auto frame = frames_[frame_id];
-  frame->pin_count_++;
-  replacer_->SetEvictable(frame_id, false);
-  std::unique_lock<std::mutex> frame_lock(frame->latch_);
+  if(!frame->is_loaded_.load()){
+    return false;
+  }
+  frame->latch_.lock();
   if (!frame->is_dirty_) {
-    if(frame->pin_count_-- == 1){ 
-      replacer_->SetEvictable(frame_id, true);
-    }
     return true;
   }
+  frame->latch_.unlock();
+  auto cnt = frame->pin_count_++;
+  if (cnt == 0) {
+    replacer_->SetEvictable(frame_id, false);
+  }
+  auto future = TransDisk(page_id, frame, true);
+  auto callback_future = CallbackFuture<bool>(std::move(future));
+  callback_future.Then([this,&frame](bool result) {
+    std::scoped_lock<std::mutex> lock(*this->bpm_latch_);
+    auto cnt = frame->pin_count_--;
+    if(cnt == 1){
+      replacer_->SetEvictable(frame->frame_id_, true);
+    }
+  });
   frame->is_dirty_ = false;
-  frame_lock.unlock();
-  // 写回磁盘
-  TransDisk(page_id, frame, true);
-  // DiskRequest r;
-  // r.is_write_ = true;
-  // r.data_ = frame->GetDataMut();
-  // r.page_id_ = page_id;
-  // r.callback_ = disk_scheduler_->CreatePromise();
-  // auto future = r.callback_.get_future();
-  // disk_scheduler_->Schedule(std::move(r));
   return true;
 }
 
@@ -441,7 +444,24 @@ auto BufferPoolManager::FlushPageUnsafe(page_id_t page_id) -> bool {
  * @param page_id The page ID of the page to be flushed.
  * @return `false` if the page could not be found in the page table, otherwise `true`.
  */
-auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool { 
+  std::unique_lock<std::mutex> lock(*bpm_latch_);
+  auto iter = page_table_.find(page_id);
+  if(iter==page_table_.end()){
+    return false;
+  }
+  auto frame_id = iter->second;
+  auto frame = frames_[frame_id];
+  if(!frame->is_loaded_.load()){
+    return false;
+  }
+  if(!frame->is_dirty_){
+    return true;
+  }
+  ReadPageGuard guard(page_id, frame, replacer_, bpm_latch_, disk_scheduler_);
+  guard.Flush();
+  return true;
+}
 
 /**
  * @brief Flushes all page data that is in memory to disk unsafely.
@@ -456,7 +476,13 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool { UNIMPLEMENTED("TO
  *
  * TODO(P1): Add implementation
  */
-void BufferPoolManager::FlushAllPagesUnsafe() { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+void BufferPoolManager::FlushAllPagesUnsafe() { 
+  std::scoped_lock<std::mutex> lock(*bpm_latch_);
+  for(auto &iter: page_table_){
+    auto page_id = iter.first;
+    FlushPageUnsafe(page_id);
+  }
+ }
 
 /**
  * @brief Flushes all page data that is in memory to disk safely.

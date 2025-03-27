@@ -35,6 +35,54 @@ class BufferPoolManager;
 class ReadPageGuard;
 class WritePageGuard;
 
+template <typename T>
+class CallbackFuture {
+public:
+    explicit CallbackFuture(std::future<T>&& future)
+        : future_(std::move(future)) {}
+    
+    // 添加回调
+    template <typename F>
+    void Then(F&& callback) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (ready_) {
+            // 如果已就绪，立即执行回调
+            callback(future_.get());
+        } else {
+            // 否则存储回调
+            callbacks_.push_back(std::forward<F>(callback));
+            
+            // 如果这是第一个回调，启动监控线程
+            if (callbacks_.size() == 1) {
+                StartMonitor();
+            }
+        }
+    }
+    
+private:
+    void StartMonitor() {
+        std::thread([this]() {
+            T result = future_.get();  // 等待结果
+            std::vector<std::function<void(T)>> callbacks_copy;
+            
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                ready_ = true;
+                callbacks_copy = std::move(callbacks_);
+            }
+            
+            // 执行所有回调
+            for (auto& callback : callbacks_copy) {
+                callback(result);
+            }
+        }).detach();
+    }
+    
+    std::future<T> future_;
+    std::mutex mutex_;
+    std::vector<std::function<void(T)>> callbacks_;
+    bool ready_ = false;
+};
 /**
  * @brief A helper class for `BufferPoolManager` that manages a frame of memory and related metadata.
  *

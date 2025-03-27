@@ -41,13 +41,7 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
   is_valid_ = true;
   
   frame_->rwlatch_.lock_shared();
-  auto cnt = frame_->pin_count_++;
-  if (cnt == 0) {
-    std::scoped_lock<std::mutex> lock(*bpm_latch_);
-    if(frame->pin_count_.load() == 1) {
-      replacer_->SetEvictable(frame_->frame_id_, false);
-    }
-  }
+
   replacer_->RecordAccess(frame_->frame_id_);
 
 }
@@ -141,13 +135,14 @@ auto ReadPageGuard::IsDirty() const -> bool {
 void ReadPageGuard::Flush() {
   BUSTUB_ENSURE(is_valid_, "tried to use an invalid read guard");
   // 1. 检查该页是否已经被标记为脏页
-  if (frame_->is_dirty_) {
+  std::scoped_lock<std::mutex> lock(frame_->latch_);
+  if (this->IsDirty()) {
     // 2. 调用 DiskScheduler 的 FlushPage 方法将该页的数据写入磁盘
     auto promise = disk_scheduler_->CreatePromise();
     auto future = promise.get_future();
     DiskRequest request;
     request.is_write_ = true;
-    request.data_ = frame_->GetData();
+    request.data_ = (frame_->GetDataMut());
     request.page_id_ = page_id_;
     request.callback_ = std::move(promise);
     disk_scheduler_->Schedule(std::move(request));
@@ -157,7 +152,6 @@ void ReadPageGuard::Flush() {
     }
     
   }
-  UNIMPLEMENTED("TODO(P1): Add implementation."); 
 }
 
 /**
@@ -173,6 +167,7 @@ void ReadPageGuard::Flush() {
  */
 void ReadPageGuard::Drop() { 
   if (is_valid_) {
+    frame_->rwlatch_.unlock_shared();
     auto cnt = frame_->pin_count_--;
     if (cnt == 1) {
       std::scoped_lock<std::mutex> lock(*bpm_latch_);
@@ -180,7 +175,6 @@ void ReadPageGuard::Drop() {
         replacer_->SetEvictable(frame_->frame_id_, true);
       }
     }
-    frame_->rwlatch_.unlock_shared();
   }
 }
 
