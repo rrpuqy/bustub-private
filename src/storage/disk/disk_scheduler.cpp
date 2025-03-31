@@ -19,7 +19,6 @@ namespace bustub {
 DiskScheduler::DiskScheduler(DiskManager *disk_manager) : disk_manager_(disk_manager) {
   // TODO(P1): remove this line after you have implemented the disk scheduler API
 
-
   // Spawn the background thread
   background_thread_.emplace([&] { StartWorkerThread(); });
 }
@@ -64,14 +63,14 @@ void DiskScheduler::StartWorkerThread() {
       break;
     }
     // 处理请求
+
     if (request->is_write_) {
       // 写入请求
       disk_manager_->WritePage(request->page_id_, request->data_);
       // 调用回调函数
       request->callback_.set_value(true);
 
-    }
-    else {
+    } else {
       // 读取请求
       disk_manager_->ReadPage(request->page_id_, request->data_);
       // 调用回调函数

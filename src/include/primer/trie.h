@@ -128,14 +128,14 @@ class Trie {
   template <class T>
   auto Get(std::string_view key) const -> const T *;
 
-  template<class T>
-  auto PutInternal(std::unique_ptr<TrieNode>,std::string_view key, T value) const -> std::shared_ptr<const TrieNode>;
+  template <class T>
+  auto PutInternal(std::unique_ptr<TrieNode>, std::string_view key, T value) const -> std::shared_ptr<const TrieNode>;
 
   template <class T>
   auto Put(std::string_view key, T value) const -> Trie;
-  
-  auto RemoveInternal(std::unique_ptr<TrieNode> pre,std::string_view key) const -> std::unique_ptr< TrieNode>;
-  
+
+  auto RemoveInternal(std::unique_ptr<TrieNode> pre, std::string_view key) const -> std::unique_ptr<TrieNode>;
+
   auto Remove(std::string_view key) const -> Trie;
 
   // Get the root of the trie, should only be used in test cases.

@@ -28,39 +28,32 @@ namespace bustub {
 enum class AccessType { Unknown = 0, Lookup, Scan, Index };
 
 class LRUKNode {
-
  public:
-  explicit LRUKNode(frame_id_t fid,size_t k) : k_(k), fid_(fid) {}
-  auto  GetBackwardKDistance() const -> size_t{
-    if(history_.size() < k_){
+  explicit LRUKNode(frame_id_t fid, size_t k) : k_(k), fid_(fid) {}
+  auto GetBackwardKDistance() const -> size_t {
+    if (history_.size() < k_) {
       // return std::numeric_limits<size_t>::max();
       return 0;
     }
     return history_.front();
   }
-  void RecordAccess(size_t timestamp){
-    if(history_.size() == k_){
+  void RecordAccess(size_t timestamp) {
+    if (history_.size() == k_) {
       history_.pop_front();
     }
     history_.push_back(timestamp);
   }
 
-  void SetEvictable(bool set_evictable){
-    is_evictable_ = set_evictable;
-  }
+  void SetEvictable(bool set_evictable) { is_evictable_ = set_evictable; }
 
-  auto IsEvictable() const -> bool{
-    return is_evictable_;
-  }
+  auto IsEvictable() const -> bool { return is_evictable_; }
 
-  auto GetHistroy() const -> std::list<size_t>{
-    return history_;
-  }
-  auto operator<(const LRUKNode &other) -> bool{
-    if(GetBackwardKDistance() != other.GetBackwardKDistance()){
-      return GetBackwardKDistance() < other.GetBackwardKDistance();
-    }
+  auto GetHistroy() const -> std::list<size_t> { return history_; }
+  auto operator<(const LRUKNode &other) -> bool {
+    if (history_.size() < k_ && other.history_.size() < k_) {
       return history_.back() < other.history_.back();
+    }
+    return GetBackwardKDistance() < other.GetBackwardKDistance();
   }
 
  private:
@@ -110,7 +103,7 @@ class LRUKReplacer {
  private:
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
-  [[maybe_unused]] std::unordered_map<frame_id_t, std::pair<LRUKNode,std::list<frame_id_t>::iterator> > node_store_;
+  [[maybe_unused]] std::unordered_map<frame_id_t, std::pair<LRUKNode, std::list<frame_id_t>::iterator> > node_store_;
   [[maybe_unused]] std::list<frame_id_t> lru_list_;
   [[maybe_unused]] size_t current_timestamp_{0};
   [[maybe_unused]] size_t curr_size_{0};

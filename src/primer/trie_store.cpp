@@ -44,7 +44,7 @@ void TrieStore::Put(std::string_view key, T value) {
   // You will need to ensure there is only one writer at a time. Think of how you can achieve this.
   // The logic should be somehow similar to `TrieStore::Get`.
   write_lock_.lock();
-  auto new_root = root_.Put(key,std::move(value));
+  auto new_root = root_.Put(key, std::move(value));
   root_lock_.lock();
   root_ = std::move(new_root);
   root_lock_.unlock();

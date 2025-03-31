@@ -11,6 +11,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "storage/page/page_guard.h"
+#include <pthread.h>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include "storage/disk/disk_scheduler.h"
@@ -39,11 +41,10 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
       bpm_latch_(std::move(bpm_latch)),
       disk_scheduler_(std::move(disk_scheduler)) {
   is_valid_ = true;
-  
+
   frame_->rwlatch_.lock_shared();
 
   replacer_->RecordAccess(frame_->frame_id_);
-
 }
 
 /**
@@ -62,6 +63,10 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
  * @param that The other page guard.
  */
 ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
+  if (this == &that) {
+    return;
+  }
+  this->Drop();
   page_id_ = that.page_id_;
   frame_ = std::move(that.frame_);
   replacer_ = std::move(that.replacer_);
@@ -88,7 +93,11 @@ ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
  * @param that The other page guard.
  * @return ReadPageGuard& The newly valid `ReadPageGuard`.
  */
-auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & { 
+auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & {
+  if (this == &that) {
+    return *this;
+  }
+  this->Drop();
   this->page_id_ = that.page_id_;
   this->frame_ = std::move(that.frame_);
   this->replacer_ = std::move(that.replacer_);
@@ -96,11 +105,7 @@ auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & 
   this->disk_scheduler_ = std::move(that.disk_scheduler_);
   this->is_valid_ = that.is_valid_;
   that.is_valid_ = false;
-  replacer_->RecordAccess(this->frame_->frame_id_);
-  this->frame_->rwlatch_.lock();
-  this->frame_->pin_count_++;
-  return *this; 
-
+  return *this;
 }
 
 /**
@@ -135,9 +140,11 @@ auto ReadPageGuard::IsDirty() const -> bool {
 void ReadPageGuard::Flush() {
   BUSTUB_ENSURE(is_valid_, "tried to use an invalid read guard");
   // 1. 检查该页是否已经被标记为脏页
-  std::scoped_lock<std::mutex> lock(frame_->latch_);
+  std::unique_lock<std::mutex> lock(frame_->latch_);
   if (this->IsDirty()) {
     // 2. 调用 DiskScheduler 的 FlushPage 方法将该页的数据写入磁盘
+    frame_->is_dirty_ = false;
+    lock.unlock();
     auto promise = disk_scheduler_->CreatePromise();
     auto future = promise.get_future();
     DiskRequest request;
@@ -146,11 +153,7 @@ void ReadPageGuard::Flush() {
     request.page_id_ = page_id_;
     request.callback_ = std::move(promise);
     disk_scheduler_->Schedule(std::move(request));
-    if(future.get()){
-      // 3. 将该页的脏标记位清除
-      frame_->is_dirty_ = false;
-    }
-    
+    future.wait();
   }
 }
 
@@ -165,13 +168,14 @@ void ReadPageGuard::Flush() {
  *
  * TODO(P1): Add implementation.
  */
-void ReadPageGuard::Drop() { 
+void ReadPageGuard::Drop() {
   if (is_valid_) {
+    is_valid_ = false;
     frame_->rwlatch_.unlock_shared();
     auto cnt = frame_->pin_count_--;
     if (cnt == 1) {
       std::scoped_lock<std::mutex> lock(*bpm_latch_);
-      if(frame_->pin_count_.load() == 0) {
+      if (frame_->pin_count_.load() == 0) {
         replacer_->SetEvictable(frame_->frame_id_, true);
       }
     }
@@ -209,9 +213,7 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
   is_valid_ = true;
   frame_->rwlatch_.lock();
-  frame_->pin_count_++;
   replacer_->RecordAccess(frame_->frame_id_);
-  frame_->is_dirty_ = true;
 }
 
 /**
@@ -230,6 +232,10 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
  * @param that The other page guard.
  */
 WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
+  if (this == &that) {
+    return;
+  }
+  this->Drop();
   page_id_ = that.page_id_;
   frame_ = std::move(that.frame_);
   replacer_ = std::move(that.replacer_);
@@ -256,7 +262,12 @@ WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
  * @param that The other page guard.
  * @return WritePageGuard& The newly valid `WritePageGuard`.
  */
-auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard & { 
+auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard & {
+  // 判断是否是自己
+  if (this == &that) {
+    return *this;
+  }
+  this->Drop();
   this->page_id_ = that.page_id_;
   this->frame_ = std::move(that.frame_);
   this->replacer_ = std::move(that.replacer_);
@@ -264,7 +275,7 @@ auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard
   this->disk_scheduler_ = std::move(that.disk_scheduler_);
   this->is_valid_ = that.is_valid_;
   that.is_valid_ = false;
-  return *this; 
+  return *this;
 }
 
 /**
@@ -304,7 +315,29 @@ auto WritePageGuard::IsDirty() const -> bool {
  *
  * TODO(P1): Add implementation.
  */
-void WritePageGuard::Flush() { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+void WritePageGuard::Flush() {
+  BUSTUB_ENSURE(is_valid_, "tried to use an invalid write guard");
+  // 1. 检查该页是否已经被标记为脏页
+  std::unique_lock<std::mutex> lock(frame_->latch_);
+  if (this->IsDirty()) {
+    frame_->is_dirty_ = false;
+    lock.unlock();
+    // 2. 调用 DiskScheduler 的 FlushPage 方法将该页的数据写入磁盘
+    auto promise = disk_scheduler_->CreatePromise();
+    auto future = promise.get_future();
+    DiskRequest request;
+    request.is_write_ = true;
+    request.data_ = (frame_->GetDataMut());
+    request.page_id_ = page_id_;
+    request.callback_ = std::move(promise);
+    disk_scheduler_->Schedule(std::move(request));
+    future.get();
+    // if(future.get()){
+    //   // 3. 将该页的脏标记位清除
+    //   frame_->is_dirty_ = false;
+    // }
+  }
+}
 
 /**
  * @brief Manually drops a valid `WritePageGuard`'s data. If this guard is invalid, this function does nothing.
@@ -317,7 +350,22 @@ void WritePageGuard::Flush() { UNIMPLEMENTED("TODO(P1): Add implementation."); }
  *
  * TODO(P1): Add implementation.
  */
-void WritePageGuard::Drop() { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+void WritePageGuard::Drop() {
+  if (is_valid_) {
+    is_valid_ = false;
+    frame_->latch_.lock();
+    frame_->is_dirty_ = true;
+    frame_->latch_.unlock();
+    frame_->rwlatch_.unlock();
+    auto cnt = frame_->pin_count_.fetch_sub(1);
+    if (cnt == 1) {
+      std::scoped_lock<std::mutex> lock(*bpm_latch_);
+      if (frame_->pin_count_.load() == 0) {
+        replacer_->SetEvictable(frame_->frame_id_, true);
+      }
+    }
+  }
+}
 
 /** @brief The destructor for `WritePageGuard`. This destructor simply calls `Drop()`. */
 WritePageGuard::~WritePageGuard() { Drop(); }

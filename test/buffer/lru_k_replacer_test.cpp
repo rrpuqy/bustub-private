@@ -57,14 +57,14 @@ TEST(LRUKReplacerTest, SampleTest) {
 
   // Record an access for frame 1. Now frame 1 has two accesses total.
   lru_replacer.RecordAccess(1);
-  std::cout<< "enter access\n" << '\n';
+  std::cout << "enter access\n" << '\n';
   // All other frames now share the maximum backward k-distance. Since we use timestamps to break ties, where the first
   // to be evicted is the frame with the oldest timestamp, the order of eviction should be [2, 3, 4, 5, 1].
 
   // Evict three pages from the replacer.
   // To break ties, we use LRU with respect to the oldest timestamp, or the least recently used frame.
   ASSERT_EQ(2, lru_replacer.Evict());
-  std::cout<<"enter evict 1\n"<<'\n';
+  std::cout << "enter evict 1\n" << '\n';
   ASSERT_EQ(3, lru_replacer.Evict());
   ASSERT_EQ(4, lru_replacer.Evict());
   ASSERT_EQ(2, lru_replacer.Size());
@@ -78,7 +78,7 @@ TEST(LRUKReplacerTest, SampleTest) {
   lru_replacer.SetEvictable(3, true);
   lru_replacer.SetEvictable(4, true);
   ASSERT_EQ(4, lru_replacer.Size());
-  std::cout<< "[3,1,5,4]\n";
+  std::cout << "[3,1,5,4]\n";
 
   // Look for a frame to evict. We expect frame 3 to be evicted next.
   ASSERT_EQ(3, lru_replacer.Evict());

@@ -1,4 +1,4 @@
-\//===----------------------------------------------------------------------===//
+\  //===----------------------------------------------------------------------===//
 //
 //                         BusTub
 //
@@ -19,34 +19,34 @@
 #include "storage/disk/disk_manager_memory.h"
 #include "storage/disk/disk_scheduler.h"
 
-namespace bustub {
+    namespace bustub {
 
-using bustub::DiskManagerUnlimitedMemory;
+  using bustub::DiskManagerUnlimitedMemory;
 
-// NOLINTNEXTLINE
-TEST(DiskSchedulerTest, ScheduleWriteReadPageTest) {
-  char buf[BUSTUB_PAGE_SIZE] = {0};
-  char data[BUSTUB_PAGE_SIZE] = {0};
+  // NOLINTNEXTLINE
+  TEST(DiskSchedulerTest, ScheduleWriteReadPageTest) {
+    char buf[BUSTUB_PAGE_SIZE] = {0};
+    char data[BUSTUB_PAGE_SIZE] = {0};
 
-  auto dm = std::make_unique<DiskManagerUnlimitedMemory>();
-  auto disk_scheduler = std::make_unique<DiskScheduler>(dm.get());
+    auto dm = std::make_unique<DiskManagerUnlimitedMemory>();
+    auto disk_scheduler = std::make_unique<DiskScheduler>(dm.get());
 
-  std::strncpy(data, "A test string.", sizeof(data));
+    std::strncpy(data, "A test string.", sizeof(data));
 
-  auto promise1 = disk_scheduler->CreatePromise();
-  auto future1 = promise1.get_future();
-  auto promise2 = disk_scheduler->CreatePromise();
-  auto future2 = promise2.get_future();
+    auto promise1 = disk_scheduler->CreatePromise();
+    auto future1 = promise1.get_future();
+    auto promise2 = disk_scheduler->CreatePromise();
+    auto future2 = promise2.get_future();
 
-  disk_scheduler->Schedule({/*is_write=*/true, data, /*page_id=*/0, std::move(promise1)});
-  disk_scheduler->Schedule({/*is_write=*/false, buf, /*page_id=*/0, std::move(promise2)});
+    disk_scheduler->Schedule({/*is_write=*/true, data, /*page_id=*/0, std::move(promise1)});
+    disk_scheduler->Schedule({/*is_write=*/false, buf, /*page_id=*/0, std::move(promise2)});
 
-  ASSERT_TRUE(future1.get());
-  ASSERT_TRUE(future2.get());
-  ASSERT_EQ(std::memcmp(buf, data, sizeof(buf)), 0);
+    ASSERT_TRUE(future1.get());
+    ASSERT_TRUE(future2.get());
+    ASSERT_EQ(std::memcmp(buf, data, sizeof(buf)), 0);
 
-  disk_scheduler = nullptr;  // Call the DiskScheduler destructor to finish all scheduled jobs.
-  dm->ShutDown();
-}
+    disk_scheduler = nullptr;  // Call the DiskScheduler destructor to finish all scheduled jobs.
+    dm->ShutDown();
+  }
 
 }  // namespace bustub
